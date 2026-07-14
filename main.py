@@ -2,16 +2,55 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
+import os
+import urllib.request
 from datetime import datetime
 from collections import Counter
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from wordcloud import WordCloud
 import plotly.express as px
 import plotly.graph_objects as go
 from googleapiclient.discovery import build
-from textblob import TextBlob
 
 st.set_page_config(page_title="유튜브 댓글 분석기", page_icon="📺", layout="wide")
+
+# ------------------------------
+# 폰트 자동 다운로드 (한글 지원)
+# ------------------------------
+FONT_PATH = "NanumGothic.ttf"
+
+@st.cache_resource
+def get_font_path():
+    if os.path.exists(FONT_PATH) and os.path.getsize(FONT_PATH) > 100000:
+        return FONT_PATH
+
+    urls = [
+        "https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@master/NanumGothic.ttf",
+        "https://github.com/moonspam/NanumSquare/raw/master/NanumGothic.ttf",
+        "https://raw.githubusercontent.com/googlefonts/nanum-gothic/main/fonts/ttf/NanumGothic-Regular.ttf",
+    ]
+
+    for url in urls:
+        try:
+            urllib.request.urlretrieve(url, FONT_PATH)
+            if os.path.exists(FONT_PATH) and os.path.getsize(FONT_PATH) > 100000:
+                return FONT_PATH
+        except Exception:
+            continue
+
+    return None
+
+font_path = get_font_path()
+
+if font_path:
+    try:
+        font_manager.fontManager.addfont(font_path)
+        plt.rcParams["font.family"] = font_manager.FontProperties(fname=font_path).get_name()
+    except Exception:
+        pass
+else:
+    st.warning("⚠️ 한글 폰트 다운로드에 실패했습니다. 워드클라우드에서 한글이 깨질 수 있습니다.")
 
 # ------------------------------
 # API 키 설정
@@ -28,7 +67,6 @@ youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 # 유틸 함수
 # ------------------------------
 def extract_video_id(url_or_id):
-    """유튜브 URL 또는 ID에서 video ID 추출"""
     patterns = [
         r"(?:v=|\/)([0-9A-Za-z_-]{11}).*",
         r"youtu\.be\/([0-9A-Za-z_-]{11})",
@@ -43,7 +81,6 @@ def extract_video_id(url_or_id):
 
 
 def get_video_info(video_id):
-    """영상 정보 가져오기"""
     request = youtube.videos().list(
         part="snippet,statistics",
         id=video_id
@@ -55,7 +92,6 @@ def get_video_info(video_id):
 
 
 def get_comments(video_id, max_results=200):
-    """댓글 가져오기"""
     comments = []
     next_page_token = None
 
@@ -91,15 +127,13 @@ def get_comments(video_id, max_results=200):
 
 
 def clean_text(text):
-    """텍스트 정제"""
-    text = re.sub(r"http\S+", "", text)  # URL 제거
-    text = re.sub(r"[^\w\s가-힣]", " ", text)  # 특수문자 제거
+    text = re.sub(r"http\S+", "", text)
+    text = re.sub(r"[^\w\s가-힣]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
 def get_stopwords():
-    """한글 불용어 리스트"""
     return set([
         "이", "그", "저", "것", "수", "등", "들", "및", "를", "에", "의", "가", "은", "는",
         "이다", "있다", "하다", "되다", "않다", "없다", "같다", "너무", "정말", "진짜",
@@ -112,7 +146,6 @@ def get_stopwords():
 
 
 def simple_sentiment_analysis(text):
-    """간단한 감성 분석 (긍정/부정 키워드 기반)"""
     positive_words = ["좋다", "최고", "감사", "사랑", "멋지다", "훌륭", "대박", "굿", "good", 
                        "great", "love", "thank", "best", "amazing", "재밌", "웃기", "행복",
                        "예쁘", "잘하", "짱", "굳", "완벽", "감동"]
@@ -167,7 +200,6 @@ if analyze_button and video_input:
         if not video_info:
             st.error("영상 정보를 찾을 수 없습니다. URL을 확인해주세요.")
         else:
-            # 영상 정보 표시
             snippet = video_info["snippet"]
             stats = video_info["statistics"]
 
@@ -188,7 +220,6 @@ if analyze_button and video_input:
 
             st.markdown("---")
 
-            # 댓글 가져오기
             with st.spinner(f"댓글 {max_comments}개를 가져오는 중..."):
                 comments = get_comments(video_id, max_comments)
 
@@ -202,7 +233,6 @@ if analyze_button and video_input:
 
                 st.success(f"✅ 총 {len(df)}개의 댓글을 성공적으로 가져왔습니다!")
 
-                # 탭 구성
                 tab1, tab2, tab3, tab4, tab5 = st.tabs(
                     ["☁️ 워드클라우드", "😊 감성 분석", "🏆 인기 댓글", "📊 통계", "📋 전체 댓글"]
                 )
@@ -230,7 +260,7 @@ if analyze_button and video_input:
                     filtered_words = [w for w in words if w not in stopwords and len(w) > 1]
                     word_freq = Counter(filtered_words)
 
-                    if word_freq:
+                    if word_freq and font_path:
                         mask = None
                         if shape == "원형":
                             x, y = np.ogrid[:600, :600]
@@ -239,7 +269,7 @@ if analyze_button and video_input:
 
                         try:
                             wc = WordCloud(
-                                font_path="NanumGothic.ttf",
+                                font_path=font_path,
                                 width=1200,
                                 height=800,
                                 background_color=bg_color,
@@ -256,7 +286,6 @@ if analyze_button and video_input:
                             ax.axis("off")
                             st.pyplot(fig)
 
-                            # 다운로드 버튼
                             import io as io_module
                             buf = io_module.BytesIO()
                             fig.savefig(buf, format="png", dpi=300, bbox_inches="tight", 
@@ -269,12 +298,10 @@ if analyze_button and video_input:
                             )
                         except Exception as e:
                             st.error(f"워드클라우드 생성 오류: {e}")
-                            st.info("NanumGothic.ttf 폰트 파일이 저장소 루트에 있는지 확인해주세요.")
+                    elif not font_path:
+                        st.error("한글 폰트를 사용할 수 없어 워드클라우드를 생성할 수 없습니다.")
                     else:
                         st.warning("분석할 단어가 충분하지 않습니다.")
-
-                    with col2:
-                        pass  # 워드클라우드는 위에서 전체 폭으로 표시됨
 
                     st.markdown("---")
                     st.subheader("🔝 최다 언급 단어 TOP 20")
@@ -361,7 +388,6 @@ if analyze_button and video_input:
 
                     st.markdown("---")
 
-                    # 시간대별 댓글 분포
                     st.subheader("📅 댓글 작성 시간 트렌드")
                     df["날짜"] = df["작성일"].dt.date
                     daily_counts = df.groupby("날짜").size().reset_index(name="댓글수")
@@ -372,7 +398,6 @@ if analyze_button and video_input:
                     )
                     st.plotly_chart(fig_line, use_container_width=True)
 
-                    # 댓글 길이 분포
                     st.subheader("📏 댓글 길이 분포")
                     df["댓글길이"] = df["댓글"].str.len()
                     fig_hist = px.histogram(
@@ -381,7 +406,6 @@ if analyze_button and video_input:
                     )
                     st.plotly_chart(fig_hist, use_container_width=True)
 
-                    # 좋아요 분포
                     st.subheader("👍 좋아요 수 분포")
                     fig_box = px.box(df, y="좋아요", title="좋아요 수 박스플롯")
                     st.plotly_chart(fig_box, use_container_width=True)
